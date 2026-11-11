@@ -646,3 +646,96 @@ export async function setUserBlocked(targetUserId, blocked) {
   });
   if (error) throw error;
 }
+
+/* =====================================================================
+   ADMIN PANEL
+===================================================================== */
+
+/** Schnellzahlen für die Übersicht (Parallelabfragen mit Kopfzählung). */
+export async function getAdminStats() {
+  const head = { count: "exact", head: true };
+  const [users, videos, pending, reports, blocked, comments] = await Promise.all([
+    supabase.from("profiles").select("id", head),
+    supabase.from("videos").select("id", head),
+    supabase.from("videos").select("id", head).eq("moderation_status", "pending"),
+    supabase.from("reports").select("id", head).eq("status", "open"),
+    supabase.from("profiles").select("id", head).eq("is_blocked", true),
+    supabase.from("comments").select("id", head),
+  ]);
+  return {
+    users: users.count || 0,
+    videos: videos.count || 0,
+    pending: pending.count || 0,
+    reports: reports.count || 0,
+    blocked: blocked.count || 0,
+    comments: comments.count || 0,
+  };
+}
+
+/** Videos für die Moderation, optional auf einen Status gefiltert. */
+export async function listVideosForModeration({ status = "pending", limit = 50 } = {}) {
+  let request = supabase
+    .from("videos")
+    .select(VIDEO_WITH_AUTHOR)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (status && status !== "all") request = request.eq("moderation_status", status);
+  const { data, error } = await request;
+  if (error) throw error;
+  return data || [];
+}
+
+/** Die neuesten Kommentare (inkl. Autor) für die Kommentar-Moderation. */
+export async function listRecentComments(limit = 50) {
+  const { data, error } = await supabase
+    .from("comments")
+    .select(`id, video_id, user_id, content, moderation_status, like_count, created_at,
+             profiles!comments_user_id_fkey(${PROFILE_COLUMNS})`)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+/** Globale Plattform-Einstellungen (Lockdown & Schalter). */
+export async function getPlatformSettings() {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("lockdown_enabled, lockdown_message, signups_disabled, uploads_disabled, updated_at")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || {
+    lockdown_enabled: false, lockdown_message: "",
+    signups_disabled: false, uploads_disabled: false, updated_at: null,
+  };
+}
+
+/** Lockdown und Schalter setzen (nur Admin - serverseitig geprüft). */
+export async function setLockdown({
+  enabled, message = "", signupsDisabled = false, uploadsDisabled = false,
+}) {
+  const { error } = await supabase.rpc("nextwave_set_lockdown", {
+    p_enabled: !!enabled,
+    p_message: message || "",
+    p_signups_disabled: !!signupsDisabled,
+    p_uploads_disabled: !!uploadsDisabled,
+  });
+  if (error) throw error;
+}
+
+/** Nutzerliste fuer das Admin-Panel (Suche + optionale Filter). */
+export async function adminListProfiles({ query = "", filter = "all", limit = 100 } = {}) {
+  let request = supabase.from("profiles").select(PROFILE_COLUMNS).limit(limit);
+  const term = String(query || "").trim();
+  if (term) {
+    request = request.or(
+      `username.ilike.${likePattern(term)},display_name.ilike.${likePattern(term)}`
+    );
+  }
+  if (filter === "blocked") request = request.eq("is_blocked", true);
+  if (filter === "moderators") request = request.in("role", ["moderator", "admin"]);
+  const { data, error } = await request.order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}

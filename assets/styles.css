@@ -544,6 +544,43 @@ textarea.input { resize: vertical; min-height: 90px; }
 .switch-row input { width: 44px; height: 24px; accent-color: var(--primary); }
 
 /* =====================================================================
+   Admin-Panel
+   ===================================================================== */
+/* Waagerecht scrollbare Tab-Leiste (viele Tabs auf schmalen Displays). */
+.tabs-scroll {
+  display: flex; gap: 8px; margin-bottom: 16px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tabs-scroll::-webkit-scrollbar { display: none; }
+.tabs-scroll .tab { flex: 0 0 auto; padding: 9px 16px; white-space: nowrap; }
+
+/* Statistik-Raster in der Uebersicht. */
+.admin-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  margin-bottom: 18px;
+}
+.stat-card {
+  background: var(--surface-2); border: 1px solid var(--outline);
+  border-radius: var(--radius-sm); padding: 14px 8px; text-align: center;
+}
+.stat-card .value { font-size: 22px; font-weight: 700; }
+.stat-card .name  { font-size: 11px; color: var(--text-2); margin-top: 4px; }
+
+/* Nutzer-Zeile im Admin-Panel. */
+.admin-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--outline);
+}
+.admin-row:last-child { border-bottom: none; }
+
+/* Grosses Schloss auf dem Lockdown-Sperrbildschirm. */
+.lockdown-icon {
+  margin-top: 22px; color: var(--error);
+}
+.lockdown-icon svg { width: 46px; height: 46px; }
+
+/* =====================================================================
    Video-Feed (Reels)
    ===================================================================== */
 .feed-screen { padding: 0; overflow: hidden; position: relative; }

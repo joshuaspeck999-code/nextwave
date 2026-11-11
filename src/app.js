@@ -12,8 +12,8 @@
 // =====================================================================
 import { supabase } from "./supabaseClient.js";
 import { IS_CONFIGURED } from "./config.js";
-import { describeError, toast } from "./utils.js";
-import { errorState } from "./ui.js";
+import { describeError, toast, escapeHtml } from "./utils.js";
+import { errorState, icon } from "./ui.js";
 import * as data from "./data.js";
 
 import {
@@ -67,6 +67,7 @@ const ctx = {
   user: null,
   profile: null,
   unreadCount: 0,
+  settings: null,   // globale Plattform-Einstellungen (Lockdown & Schalter)
   navigate,
   signOut,
   refreshUnread,
@@ -125,7 +126,19 @@ async function loadContext() {
   } catch {
     ctx.unreadCount = 0;
   }
+  try {
+    ctx.settings = await data.getPlatformSettings();
+  } catch {
+    ctx.settings = null;
+  }
   updateNavBadge();
+}
+
+/** Ist die Plattform im Lockdown und darf dieser Nutzer nicht durch? */
+function isLockedOut() {
+  if (!ctx.settings?.lockdown_enabled) return false;
+  const role = ctx.profile?.role;
+  return role !== "admin" && role !== "moderator";
 }
 
 async function refreshUnread() {
@@ -185,6 +198,12 @@ async function render() {
   const view = PAGES[target];
   if (!view) { navigate(ctx.user ? "home" : "welcome"); return; }
 
+  // Lockdown: normale Nutzer sehen einen Sperrbildschirm.
+  if (ctx.user && isLockedOut() && !AUTH_PAGES.has(target)) {
+    renderLockdownScreen();
+    return;
+  }
+
   // Vorherige Ansicht aufraeumen (laufende Videos stoppen).
   root.querySelectorAll("video").forEach((v) => { try { v.pause(); } catch { /* egal */ } });
 
@@ -200,6 +219,31 @@ async function render() {
     const retry = root.querySelector("[data-retry]");
     if (retry) retry.onclick = render;
   }
+}
+
+/** Vollbild-Sperrbildschirm waehrend eines aktiven Lockdowns. */
+function renderLockdownScreen() {
+  const message = ctx.settings?.lockdown_message
+    || "NEXTWAVE ist vor\u00fcbergehend pausiert. Bitte schau sp\u00e4ter noch einmal vorbei.";
+  root.innerHTML = `
+    <div class="screen no-nav">
+      <div class="center" style="margin-top:22vh;">
+        <div class="wordmark">NEXTWAVE</div>
+        <div class="lockdown-icon">${icon("lock")}</div>
+        <h2 style="margin:16px 0 6px;">Kurz pausiert</h2>
+        <p class="muted" style="max-width:340px;">${escapeHtml(message)}</p>
+        <div class="row" style="gap:10px;margin-top:22px;">
+          <button class="btn btn-primary" data-reload>Erneut versuchen</button>
+          <button class="btn btn-ghost" data-logout>Abmelden</button>
+        </div>
+      </div>
+    </div>`;
+
+  root.querySelector("[data-reload]").onclick = async () => {
+    await loadContext();
+    render();
+  };
+  root.querySelector("[data-logout]").onclick = () => signOut();
 }
 
 /* =====================================================================

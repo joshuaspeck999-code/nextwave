@@ -2,10 +2,10 @@
 // NEXTWAVE - Entdecken (Suche), Aktivitaeten (Benachrichtigungen), Moderation
 // =====================================================================
 import * as data from "./data.js";
-import { escapeHtml, describeError, toast, debounce } from "./utils.js";
+import { escapeHtml, describeError, toast, debounce, formatCount } from "./utils.js";
 import {
   icon, avatarHtml, bottomNav, emptyState, errorState, skeletonRows,
-  userRow, videoTile, timeAgo,
+  userRow, videoTile, timeAgo, statusLabel,
 } from "./ui.js";
 
 /* =====================================================================
@@ -221,25 +221,38 @@ function wireNotifications(container, ctx) {
 }
 
 /* =====================================================================
-   Moderationsbereich (nur moderator/admin)
+   Administrationsbereich (Moderation + Verwaltung + Lockdown)
+   Moderatoren sehen: Übersicht, Nutzer, Videos, Meldungen, Kommentare.
+   Zusaetzlich nur fuer Admins: der Lockdown-Tab.
 ===================================================================== */
 export async function renderAdmin(root, ctx) {
   const role = ctx.profile?.role;
-  if (role !== "admin" && role !== "moderator") {
+  const isAdmin = role === "admin";
+  const isMod = role === "moderator" || isAdmin;
+  if (!isMod) {
     root.innerHTML = `<div class="screen">${emptyState("&#128274;", "Kein Zugriff",
       "Dieser Bereich ist nur fuer Moderatoren.")}</div>`;
     return;
   }
 
+  const tabs = [
+    { id: "overview", label: "Übersicht" },
+    { id: "users",    label: "Nutzer" },
+    { id: "videos",   label: "Videos" },
+    { id: "reports",  label: "Meldungen" },
+    { id: "comments", label: "Kommentare" },
+  ];
+  if (isAdmin) tabs.push({ id: "lockdown", label: "Lockdown" });
+
   root.innerHTML = `
     <div class="screen">
       <div class="topbar">
         <button class="icon-btn" data-back>${icon("back")}</button>
-        <h2 class="grow" style="margin:0;">Moderation</h2>
+        <h2 class="grow" style="margin:0;">${isAdmin ? "Admin-Panel" : "Moderation"}</h2>
       </div>
-      <div class="tabs">
-        <button class="tab active" data-tab="videos">Videos pruefen</button>
-        <button class="tab" data-tab="reports">Meldungen</button>
+      <div class="tabs tabs-scroll">
+        ${tabs.map((t, i) => `<button class="tab ${i === 0 ? "active" : ""}"
+          data-tab="${t.id}">${escapeHtml(t.label)}</button>`).join("")}
       </div>
       <div data-body>${skeletonRows(5)}</div>
     </div>`;
@@ -247,49 +260,176 @@ export async function renderAdmin(root, ctx) {
   root.querySelector("[data-back]").onclick = () => history.back();
   const body = root.querySelector("[data-body]");
 
-  const loadVideos = async () => {
-    body.innerHTML = skeletonRows(5);
+  /* -----------------------------------------------------------------
+     Übersicht / Statistiken
+  ----------------------------------------------------------------- */
+  const loadOverview = async () => {
+    body.innerHTML = skeletonRows(4);
     try {
-      const videos = await data.listPendingVideos(50);
-      if (!videos.length) { body.innerHTML = emptyState("&#9989;", "Keine offenen Videos"); return; }
-      body.innerHTML = videos.map((v) => `
-        <div class="card" style="margin-bottom:12px;">
-          <div class="row" style="align-items:flex-start;">
-            ${avatarHtml(v.profiles, "sm")}
-            <div class="grow" style="min-width:0;">
-              <div class="small"><b>@${escapeHtml(v.profiles?.username || "")}</b> · ${timeAgo(v.created_at)}</div>
-              <div class="small muted" style="margin-top:4px;">${escapeHtml(v.description || "(ohne Beschreibung)")}</div>
-            </div>
-          </div>
-          <div class="row" style="margin-top:12px;gap:8px;">
-            <button class="btn btn-primary btn-compact grow" data-approve="${v.id}">Freigeben</button>
-            <button class="btn btn-danger btn-compact grow" data-reject="${v.id}">Ablehnen</button>
-          </div>
-        </div>`).join("");
-
-      body.querySelectorAll("[data-approve]").forEach((b) => {
-        b.onclick = () => moderate(b.dataset.approve, "approved", b);
-      });
-      body.querySelectorAll("[data-reject]").forEach((b) => {
-        b.onclick = () => moderate(b.dataset.reject, "rejected", b);
-      });
+      const s = await data.getAdminStats();
+      body.innerHTML = `
+        <div class="admin-stats">
+          ${statCard("Nutzer", s.users)}
+          ${statCard("Videos", s.videos)}
+          ${statCard("In Prüfung", s.pending)}
+          ${statCard("Offene Meldungen", s.reports)}
+          ${statCard("Gesperrt", s.blocked)}
+          ${statCard("Kommentare", s.comments)}
+        </div>
+        <p class="muted small">Alle Zahlen werden live aus der Datenbank geladen.</p>`;
     } catch (error) {
       body.innerHTML = errorState(describeError(error));
     }
   };
 
-  const moderate = async (id, status, btn) => {
-    btn.disabled = true;
-    try {
-      await data.moderateVideo(id, status, "");
-      toast(status === "approved" ? "Video freigegeben." : "Video abgelehnt.", "success");
-      loadVideos();
-    } catch (error) {
-      toast(describeError(error), "error");
-      btn.disabled = false;
-    }
+  /* -----------------------------------------------------------------
+     Nutzer verwalten
+  ----------------------------------------------------------------- */
+  const loadUsers = async () => {
+    body.innerHTML = `
+      <form class="searchbar" data-user-search>
+        ${icon("search")}
+        <input class="input" name="q" placeholder="Nutzer suchen" autocomplete="off" />
+      </form>
+      <div class="tabs" style="margin:12px 0;">
+        <button class="tab active" data-ufilter="all">Alle</button>
+        <button class="tab" data-ufilter="blocked">Gesperrt</button>
+        <button class="tab" data-ufilter="moderators">Team</button>
+      </div>
+      <div data-user-list>${skeletonRows(6)}</div>`;
+
+    const list = body.querySelector("[data-user-list]");
+    const searchForm = body.querySelector("[data-user-search]");
+    const searchInput = searchForm.querySelector("[name='q']");
+    let query = "";
+    let filter = "all";
+
+    const run = async () => {
+      list.innerHTML = skeletonRows(6);
+      try {
+        const users = await data.adminListProfiles({ query, filter });
+        if (!users.length) { list.innerHTML = emptyState("&#128100;", "Keine Nutzer gefunden"); return; }
+        list.innerHTML = users.map((p) => userAdminRow(p, ctx.user.id)).join("");
+
+        list.querySelectorAll("[data-open]").forEach((b) => {
+          b.onclick = () => ctx.navigate("user", { id: b.dataset.open });
+        });
+        list.querySelectorAll("[data-block]").forEach((b) => {
+          b.onclick = async () => {
+            const blocked = b.dataset.blocked === "true";
+            b.disabled = true;
+            try {
+              await data.setUserBlocked(b.dataset.block, !blocked);
+              toast(!blocked ? "Nutzer gesperrt." : "Nutzer entsperrt.", "success");
+              run();
+            } catch (error) {
+              toast(describeError(error), "error");
+              b.disabled = false;
+            }
+          };
+        });
+      } catch (error) {
+        list.innerHTML = errorState(describeError(error));
+        const retry = list.querySelector("[data-retry]");
+        if (retry) retry.onclick = run;
+      }
+    };
+
+    searchForm.onsubmit = (e) => { e.preventDefault(); query = searchInput.value.trim(); run(); };
+    searchInput.addEventListener("input", debounce(() => { query = searchInput.value.trim(); run(); }, 350));
+    body.querySelectorAll("[data-ufilter]").forEach((t) => {
+      t.onclick = () => {
+        body.querySelectorAll("[data-ufilter]").forEach((x) => x.classList.remove("active"));
+        t.classList.add("active");
+        filter = t.dataset.ufilter;
+        run();
+      };
+    });
+
+    run();
   };
 
+  /* -----------------------------------------------------------------
+     Videos prüfen
+  ----------------------------------------------------------------- */
+  const loadVideos = async () => {
+    body.innerHTML = `
+      <div class="tabs" style="margin-bottom:12px;">
+        <button class="tab active" data-vstatus="pending">In Prüfung</button>
+        <button class="tab" data-vstatus="approved">Freigegeben</button>
+        <button class="tab" data-vstatus="rejected">Abgelehnt</button>
+        <button class="tab" data-vstatus="all">Alle</button>
+      </div>
+      <div data-video-list>${skeletonRows(5)}</div>`;
+
+    const list = body.querySelector("[data-video-list]");
+    let status = "pending";
+
+    const run = async () => {
+      list.innerHTML = skeletonRows(5);
+      try {
+        const videos = await data.listVideosForModeration({ status });
+        if (!videos.length) { list.innerHTML = emptyState("&#9989;", "Keine Videos in dieser Ansicht"); return; }
+        list.innerHTML = videos.map((v) => `
+          <div class="card" style="margin-bottom:12px;">
+            <div class="row" style="align-items:flex-start;">
+              ${avatarHtml(v.profiles, "sm")}
+              <div class="grow" style="min-width:0;">
+                <div class="small"><b>@${escapeHtml(v.profiles?.username || "")}</b> · ${timeAgo(v.created_at)}
+                  ${v.moderation_status !== "approved" ? `<span class="badge">${escapeHtml(statusLabel(v.moderation_status))}</span>` : ""}</div>
+                <div class="small muted" style="margin-top:4px;">${escapeHtml(v.description || "(ohne Beschreibung)")}</div>
+              </div>
+            </div>
+            <div class="row" style="margin-top:12px;gap:8px;">
+              <button class="btn btn-ghost btn-compact" data-vopen="${v.id}">Ansehen</button>
+              ${v.moderation_status !== "approved" ? `<button class="btn btn-primary btn-compact grow" data-approve="${v.id}">Freigeben</button>` : ""}
+              ${v.moderation_status !== "rejected" ? `<button class="btn btn-danger btn-compact grow" data-reject="${v.id}">Ablehnen</button>` : ""}
+            </div>
+          </div>`).join("");
+
+        list.querySelectorAll("[data-vopen]").forEach((b) => {
+          b.onclick = () => ctx.navigate("watch", { id: b.dataset.vopen });
+        });
+        list.querySelectorAll("[data-approve]").forEach((b) => {
+          b.onclick = () => moderateVideo(b.dataset.approve, "approved", b);
+        });
+        list.querySelectorAll("[data-reject]").forEach((b) => {
+          b.onclick = () => moderateVideo(b.dataset.reject, "rejected", b);
+        });
+      } catch (error) {
+        list.innerHTML = errorState(describeError(error));
+        const retry = list.querySelector("[data-retry]");
+        if (retry) retry.onclick = run;
+      }
+    };
+
+    const moderateVideo = async (id, newStatus, btn) => {
+      btn.disabled = true;
+      try {
+        await data.moderateVideo(id, newStatus, "");
+        toast(newStatus === "approved" ? "Video freigegeben." : "Video abgelehnt.", "success");
+        run();
+      } catch (error) {
+        toast(describeError(error), "error");
+        btn.disabled = false;
+      }
+    };
+
+    body.querySelectorAll("[data-vstatus]").forEach((t) => {
+      t.onclick = () => {
+        body.querySelectorAll("[data-vstatus]").forEach((x) => x.classList.remove("active"));
+        t.classList.add("active");
+        status = t.dataset.vstatus;
+        run();
+      };
+    });
+
+    run();
+  };
+
+  /* -----------------------------------------------------------------
+     Meldungen
+  ----------------------------------------------------------------- */
   const loadReports = async () => {
     body.innerHTML = skeletonRows(5);
     try {
@@ -297,10 +437,9 @@ export async function renderAdmin(root, ctx) {
       if (!reports.length) { body.innerHTML = emptyState("&#9989;", "Keine offenen Meldungen"); return; }
       body.innerHTML = reports.map((r) => `
         <div class="card" style="margin-bottom:12px;">
-          <div class="small muted">${escapeHtml(r.target_type)} · ${timeAgo(r.created_at)}</div>
-          <div class="small" style="margin-top:6px;">
-            Grund: <b>${escapeHtml(r.reason)}</b>
-          </div>
+          <div class="small muted">${escapeHtml(r.target_type)} · ${timeAgo(r.created_at)}
+            ${r.reporter?.username ? `· von @${escapeHtml(r.reporter.username)}` : ""}</div>
+          <div class="small" style="margin-top:6px;">Grund: <b>${escapeHtml(r.reason)}</b></div>
           ${r.details ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(r.details)}</div>` : ""}
           <div class="row" style="margin-top:12px;gap:8px;">
             <button class="btn btn-ghost btn-compact grow" data-dismiss="${r.id}">Verwerfen</button>
@@ -331,13 +470,186 @@ export async function renderAdmin(root, ctx) {
     }
   };
 
+  /* -----------------------------------------------------------------
+     Kommentare moderieren
+  ----------------------------------------------------------------- */
+  const loadComments = async () => {
+    body.innerHTML = skeletonRows(6);
+    try {
+      const comments = await data.listRecentComments(50);
+      if (!comments.length) { body.innerHTML = emptyState("&#128172;", "Noch keine Kommentare"); return; }
+      body.innerHTML = comments.map((c) => {
+        const author = c.profiles || {};
+        const removed = c.moderation_status === "rejected" || c.moderation_status === "removed";
+        return `<div class="card" style="margin-bottom:12px;">
+          <div class="row" style="align-items:flex-start;gap:10px;">
+            ${avatarHtml(author, "sm")}
+            <div class="grow" style="min-width:0;">
+              <div class="small"><b>@${escapeHtml(author.username || "unbekannt")}</b> · ${timeAgo(c.created_at)}
+                ${removed ? '<span class="badge danger">Ausgeblendet</span>' : ""}</div>
+              <div class="small" style="margin-top:4px;">${escapeHtml(c.content || "")}</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:12px;gap:8px;">
+            ${removed
+              ? `<button class="btn btn-ghost btn-compact grow" data-keep="${c.id}">Wiederherstellen</button>`
+              : `<button class="btn btn-danger btn-compact grow" data-hide="${c.id}">Ausblenden</button>`}
+          </div>
+        </div>`;
+      }).join("");
+
+      body.querySelectorAll("[data-hide]").forEach((b) => {
+        b.onclick = () => moderateComment(b.dataset.hide, "rejected", b);
+      });
+      body.querySelectorAll("[data-keep]").forEach((b) => {
+        b.onclick = () => moderateComment(b.dataset.keep, "approved", b);
+      });
+    } catch (error) {
+      body.innerHTML = errorState(describeError(error));
+    }
+  };
+
+  const moderateComment = async (id, newStatus, btn) => {
+    btn.disabled = true;
+    try {
+      await data.moderateComment(id, newStatus, "");
+      toast(newStatus === "approved" ? "Kommentar wiederhergestellt." : "Kommentar ausgeblendet.", "success");
+      loadComments();
+    } catch (error) {
+      toast(describeError(error), "error");
+      btn.disabled = false;
+    }
+  };
+
+  /* -----------------------------------------------------------------
+     Lockdown (nur Admin)
+  ----------------------------------------------------------------- */
+  const loadLockdown = async () => {
+    body.innerHTML = skeletonRows(4);
+    try {
+      const s = await data.getPlatformSettings();
+      body.innerHTML = `
+        <div class="card" style="margin-bottom:16px;border-color:${s.lockdown_enabled ? "var(--error)" : "var(--outline)"};">
+          <div class="row" style="align-items:center;gap:12px;">
+            <div class="notif-icon" style="color:${s.lockdown_enabled ? "var(--error)" : "var(--text-2)"}">${icon("lock")}</div>
+            <div class="grow">
+              <div style="font-weight:600;">${s.lockdown_enabled ? "Lockdown ist AKTIV" : "Lockdown ist inaktiv"}</div>
+              <div class="small muted">${s.lockdown_enabled
+                ? "Neue Videos und Kommentare sind derzeit für alle blockiert."
+                : "Die Plattform ist normal nutzbar."}</div>
+            </div>
+          </div>
+        </div>
+
+        <form class="stack" data-lockdown-form>
+          <label class="switch-row">
+            <span><b>Lockdown aktivieren</b>
+              <div class="small muted">Blockiert neue Videos <u>und</u> Kommentare für alle Nutzer.</div></span>
+            <input type="checkbox" name="enabled" ${s.lockdown_enabled ? "checked" : ""} />
+          </label>
+
+          <label class="switch-row">
+            <span><b>Uploads deaktivieren</b>
+              <div class="small muted">Niemand kann neue Videos hochladen (Kommentare bleiben möglich).</div></span>
+            <input type="checkbox" name="uploads" ${s.uploads_disabled ? "checked" : ""} />
+          </label>
+
+          <label class="switch-row">
+            <span><b>Registrierung deaktivieren</b>
+              <div class="small muted">Es können sich keine neuen Nutzer registrieren.</div></span>
+            <input type="checkbox" name="signups" ${s.signups_disabled ? "checked" : ""} />
+          </label>
+
+          <div class="field">
+            <label class="label" for="lock-msg">Hinweistext (wird den Nutzern angezeigt)</label>
+            <textarea class="input" id="lock-msg" name="message" maxlength="500"
+              placeholder="z. B. Kurze Wartung – wir sind gleich zurück.">${escapeHtml(s.lockdown_message || "")}</textarea>
+            <div class="field-hint">Bis zu 500 Zeichen.</div>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Einstellungen speichern</button>
+        </form>
+
+        <p class="muted small" style="margin-top:12px;">
+          Letzte Änderung: ${s.updated_at ? escapeHtml(new Date(s.updated_at).toLocaleString("de-DE")) : "—"}
+        </p>`;
+
+      const form = body.querySelector("[data-lockdown-form]");
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = form.querySelector("[type='submit']");
+        btn.disabled = true;
+        const fd = new FormData(form);
+        try {
+          await data.setLockdown({
+            enabled: fd.get("enabled") === "on",
+            uploadsDisabled: fd.get("uploads") === "on",
+            signupsDisabled: fd.get("signups") === "on",
+            message: String(fd.get("message") || ""),
+          });
+          toast("Einstellungen gespeichert.", "success");
+          loadLockdown();
+        } catch (error) {
+          toast(describeError(error), "error");
+          btn.disabled = false;
+        }
+      };
+    } catch (error) {
+      body.innerHTML = errorState(describeError(error));
+      const retry = body.querySelector("[data-retry]");
+      if (retry) retry.onclick = loadLockdown;
+    }
+  };
+
+  /* -----------------------------------------------------------------
+     Tab-Wechsel
+  ----------------------------------------------------------------- */
+  const LOADERS = {
+    overview: loadOverview,
+    users: loadUsers,
+    videos: loadVideos,
+    reports: loadReports,
+    comments: loadComments,
+    lockdown: loadLockdown,
+  };
+
   root.querySelectorAll("[data-tab]").forEach((t) => {
     t.onclick = () => {
       root.querySelectorAll("[data-tab]").forEach((x) => x.classList.remove("active"));
       t.classList.add("active");
-      if (t.dataset.tab === "reports") loadReports(); else loadVideos();
+      (LOADERS[t.dataset.tab] || loadOverview)();
     };
   });
 
-  loadVideos();
+  loadOverview();
+}
+
+/* ---------------------------------------------------------------------
+   Bausteine fuer das Admin-Panel
+--------------------------------------------------------------------- */
+function statCard(name, value) {
+  return `<div class="stat-card">
+    <div class="value">${formatCount(value)}</div>
+    <div class="name">${escapeHtml(name)}</div>
+  </div>`;
+}
+
+function userAdminRow(p, meId) {
+  const roleLabel = { admin: "Admin", moderator: "Moderator" }[p.role] || "";
+  const isMe = p.id === meId;
+  return `<div class="admin-row">
+    ${avatarHtml(p, "sm")}
+    <div class="grow" style="min-width:0;">
+      <div class="user-row-name">
+        ${escapeHtml(p.display_name || p.username)}
+        ${p.is_blocked ? '<span class="badge danger">Gesperrt</span>' : ""}
+        ${roleLabel ? `<span class="badge accent">${escapeHtml(roleLabel)}</span>` : ""}
+      </div>
+      <div class="small muted">@${escapeHtml(p.username)} &middot; ${formatCount(p.follower_count)} Follower</div>
+    </div>
+    <button class="btn btn-ghost btn-compact" data-open="${escapeHtml(p.id)}">Profil</button>
+    ${isMe ? "" : `<button class="btn ${p.is_blocked ? "btn-ghost" : "btn-danger"} btn-compact"
+      data-block="${escapeHtml(p.id)}" data-blocked="${p.is_blocked ? "true" : "false"}">
+      ${p.is_blocked ? "Entsperren" : "Sperren"}</button>`}
+  </div>`;
 }

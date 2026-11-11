@@ -16,6 +16,24 @@ const MAX_DURATION_SECONDS = 600;         // 10 Minuten
 const ALLOWED = ["video/mp4", "video/quicktime"];
 
 export function renderUpload(root, ctx) {
+  // Uploads sind waehrend eines Lockdowns bzw. wenn deaktiviert gesperrt.
+  const settings = ctx.settings || {};
+  if (settings.lockdown_enabled || settings.uploads_disabled) {
+    const message = settings.lockdown_message
+      || "Uploads sind vor\u00fcbergehend deaktiviert. Bitte versuche es sp\u00e4ter erneut.";
+    root.innerHTML = `
+      <div class="screen">
+        <div class="topbar"><h2 class="grow" style="margin:0;">Video hochladen</h2></div>
+        <div class="empty">
+          <div class="emoji">&#128274;</div>
+          <div style="color:var(--text);font-weight:600;margin-bottom:6px;">Uploads pausiert</div>
+          <div class="small">${escapeHtml(message)}</div>
+        </div>
+      </div>
+      ${bottomNav("upload", ctx.unreadCount)}`;
+    return;
+  }
+
   root.innerHTML = `
     <div class="screen">
       <div class="topbar"><h2 class="grow" style="margin:0;">Video hochladen</h2></div>
