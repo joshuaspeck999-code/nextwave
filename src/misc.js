@@ -751,7 +751,6 @@ function statCard(name, value) {
 }
 
 function userAdminRow(p, meId) {
-  const roleLabel = { admin: "Admin", moderator: "Moderator" }[p.role] || "";
   const isMe = p.id === meId;
   return `<div class="admin-row">
     ${avatarHtml(p, "sm")}
@@ -759,7 +758,6 @@ function userAdminRow(p, meId) {
       <div class="user-row-name">
         ${escapeHtml(p.display_name || p.username)}${badgeHtml(p)}
         ${p.is_blocked ? '<span class="badge danger">Gesperrt</span>' : ""}
-        ${roleLabel ? `<span class="badge accent">${escapeHtml(roleLabel)}</span>` : ""}
       </div>
       <div class="small muted">@${escapeHtml(p.username)} &middot; ${formatCount(p.follower_count)} Follower</div>
     </div>

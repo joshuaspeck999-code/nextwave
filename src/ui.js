@@ -34,6 +34,7 @@ const PATHS = {
   lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+  shield: '<path d="M12 3l7 3v5.5c0 4.5-3 8-7 9.5-4-1.5-7-5-7-9.5V6z"/>',
 };
 
 export function icon(name, cls = "") {
@@ -157,12 +158,22 @@ export function statusLabel(status) {
 }
 
 /* ---------------------------------------------------------------------
-   Event-Badge (z. B. "OG" fuer alle, die waehrend eines Events beitraten)
+   Badges neben dem Namen:
+     - Team-Badge (Admin / Moderator) aus profile.role
+     - Event-Badge (z. B. "OG" fuer alle, die waehrend eines Events beitraten)
 --------------------------------------------------------------------- */
 export function badgeHtml(profile) {
+  const parts = [];
+  if (profile?.role === "admin") {
+    parts.push(`<span class="badge admin" title="Team" style="margin-left:6px;">${icon("shield")}Admin</span>`);
+  } else if (profile?.role === "moderator") {
+    parts.push(`<span class="badge mod" title="Team" style="margin-left:6px;">${icon("check")}Moderator</span>`);
+  }
   const label = profile?.badge;
-  if (!label) return "";
-  return `<span class="badge og" title="Event-Badge">${icon("spark")}${escapeHtml(label)}</span>`;
+  if (label) {
+    parts.push(`<span class="badge og" title="Event-Badge" style="margin-left:6px;">${icon("spark")}${escapeHtml(label)}</span>`);
+  }
+  return parts.join("");
 }
 
 /* ---------------------------------------------------------------------
