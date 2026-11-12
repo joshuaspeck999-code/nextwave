@@ -307,6 +307,25 @@ textarea.input { resize: vertical; min-height: 90px; }
 .verified .ico { width: 11px; height: 11px; stroke-width: 3.2; margin: 0; }
 
 /* --------------------------------------------------------------------- */
+/* Admin-Werkzeuge                                                       */
+/* --------------------------------------------------------------------- */
+.admin-role {
+  width: auto;
+  min-width: 118px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.mini-thumb {
+  width: 44px;
+  height: 60px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, .06);
+}
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* --------------------------------------------------------------------- */
 /* Bottom-Navigation                                                     */
 /* --------------------------------------------------------------------- */
 .bottom-nav {

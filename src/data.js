@@ -656,6 +656,14 @@ export async function setUserVerified(targetUserId, verified) {
   if (error) throw error;
 }
 
+/** Rolle eines Nutzers ändern (nur Admin - serverseitig geprüft). */
+export async function setUserRole(targetUserId, role) {
+  const { error } = await supabase.rpc("nextwave_set_user_role", {
+    p_user: targetUserId, p_role: role,
+  });
+  if (error) throw error;
+}
+
 /* =====================================================================
    ADMIN PANEL
 ===================================================================== */
@@ -747,6 +755,34 @@ export async function adminListProfiles({ query = "", filter = "all", limit = 10
   const { data, error } = await request.order("created_at", { ascending: false });
   if (error) throw error;
   return data || [];
+}
+
+/** Meistgenutzte Hashtags (nur Team - serverseitig geprüft). */
+export async function topHashtags(limit = 10) {
+  const { data, error } = await supabase.rpc("nextwave_top_hashtags", { p_limit: limit });
+  if (error) throw error;
+  return data || [];
+}
+
+/** Die erfolgreichsten Videos (nach Aufrufen). */
+export async function topVideos(limit = 5) {
+  const { data, error } = await supabase
+    .from("videos")
+    .select(VIDEO_WITH_AUTHOR)
+    .order("view_count", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+/** Anzahl neu angelegter Datensätze (profiles/videos/...) seit einem Zeitpunkt. */
+export async function countSince(table, sinceIso) {
+  const { count, error } = await supabase
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", sinceIso);
+  if (error) throw error;
+  return count || 0;
 }
 
 /* =====================================================================

@@ -2,7 +2,7 @@
 // NEXTWAVE - Entdecken (Suche), Aktivitaeten (Benachrichtigungen), Moderation
 // =====================================================================
 import * as data from "./data.js";
-import { escapeHtml, describeError, toast, debounce, formatCount } from "./utils.js";
+import { escapeHtml, describeError, toast, debounce, formatCount, publicUrl } from "./utils.js";
 import {
   icon, avatarHtml, bottomNav, emptyState, errorState, skeletonRows,
   userRow, videoTile, timeAgo, statusLabel, badgeHtml,
@@ -244,6 +244,7 @@ export async function renderAdmin(root, ctx) {
   ];
   if (isAdmin) {
     tabs.push({ id: "event", label: "Event" });
+    tabs.push({ id: "tools", label: "Werkzeuge" });
     tabs.push({ id: "lockdown", label: "Lockdown" });
   }
 
@@ -343,6 +344,18 @@ export async function renderAdmin(root, ctx) {
               toast(describeError(error), "error");
               b.disabled = false;
             }
+          };
+        });
+        list.querySelectorAll("[data-role]").forEach((sel) => {
+          sel.onchange = async () => {
+            sel.disabled = true;
+            try {
+              await data.setUserRole(sel.dataset.role, sel.value);
+              toast("Rolle aktualisiert.", "success");
+            } catch (error) {
+              toast(describeError(error), "error");
+            }
+            run();
           };
         });
       } catch (error) {
@@ -731,6 +744,71 @@ export async function renderAdmin(root, ctx) {
   };
 
   /* -----------------------------------------------------------------
+     Werkzeuge & Statistiken
+  ----------------------------------------------------------------- */
+  const loadTools = async () => {
+    body.innerHTML = skeletonRows(6);
+    try {
+      const now = Date.now();
+      const minus = (days) => new Date(now - days * 86400000).toISOString();
+      const [u7, u30, v7, v30, videos, tags] = await Promise.all([
+        data.countSince("profiles", minus(7)).catch(() => 0),
+        data.countSince("profiles", minus(30)).catch(() => 0),
+        data.countSince("videos", minus(7)).catch(() => 0),
+        data.countSince("videos", minus(30)).catch(() => 0),
+        data.topVideos(5).catch(() => []),
+        data.topHashtags(10).catch(() => []),
+      ]);
+
+      body.innerHTML = `
+        <div class="stat-grid">
+          ${statCard("Neue Nutzer (7 T.)", u7)}
+          ${statCard("Neue Nutzer (30 T.)", u30)}
+          ${statCard("Neue Videos (7 T.)", v7)}
+          ${statCard("Neue Videos (30 T.)", v30)}
+        </div>
+
+        <h3 style="margin:18px 0 8px;">Top-Videos</h3>
+        ${videos.length
+          ? videos.map((v) => toolVideoRow(v)).join("")
+          : `<p class="muted small">Noch keine Videos.</p>`}
+
+        <h3 style="margin:18px 0 8px;">Top-Hashtags</h3>
+        ${tags.length
+          ? `<div class="tag-cloud">${tags.map((t) =>
+              `<span class="badge">#${escapeHtml(t.tag)} <b>${formatCount(t.uses)}</b></span>`).join(" ")}</div>`
+          : `<p class="muted small">Noch keine Hashtags.</p>`}
+
+        <h3 style="margin:18px 0 8px;">Export</h3>
+        <button class="btn btn-ghost" data-export-users>Nutzerliste als CSV herunterladen</button>`;
+
+      body.querySelectorAll("[data-vopen]").forEach((b) => {
+        b.onclick = () => ctx.navigate("watch", { id: b.dataset.vopen });
+      });
+      body.querySelector("[data-export-users]").onclick = async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          const users = await data.adminListProfiles({ limit: 1000 });
+          downloadCsv("nextwave-nutzer.csv",
+            ["id", "username", "display_name", "role", "verified", "is_blocked",
+             "follower_count", "video_count", "created_at"],
+            users.map((u) => [u.id, u.username, u.display_name, u.role,
+              u.verified, u.is_blocked, u.follower_count, u.video_count, u.created_at]));
+          toast("Nutzerliste exportiert.", "success");
+        } catch (error) {
+          toast(describeError(error), "error");
+        }
+        btn.disabled = false;
+      };
+    } catch (error) {
+      body.innerHTML = errorState(describeError(error));
+      const retry = body.querySelector("[data-retry]");
+      if (retry) retry.onclick = loadTools;
+    }
+  };
+
+  /* -----------------------------------------------------------------
      Tab-Wechsel
   ----------------------------------------------------------------- */
   const LOADERS = {
@@ -740,6 +818,7 @@ export async function renderAdmin(root, ctx) {
     reports: loadReports,
     comments: loadComments,
     event: loadEvent,
+    tools: loadTools,
     lockdown: loadLockdown,
   };
 
@@ -764,6 +843,40 @@ function statCard(name, value) {
   </div>`;
 }
 
+/** Ein Top-Video in der Werkzeuge-Ansicht. */
+function toolVideoRow(v) {
+  const author = v.profiles?.username ? "@" + v.profiles.username : "—";
+  const thumb = v.thumbnail_path
+    ? `<img class="mini-thumb" src="${escapeHtml(publicUrl("thumbnails", v.thumbnail_path))}" alt="" loading="lazy" />`
+    : `<span class="mini-thumb"></span>`;
+  return `<div class="admin-row">
+    ${thumb}
+    <div class="grow" style="min-width:0;">
+      <div class="user-row-name">${escapeHtml(v.title || "Ohne Titel")}</div>
+      <div class="small muted">${escapeHtml(author)} &middot; ${formatCount(v.view_count)} Aufrufe &middot; ${formatCount(v.like_count)} Likes</div>
+    </div>
+    <button class="btn btn-ghost btn-compact" data-vopen="${escapeHtml(v.id)}">Ansehen</button>
+  </div>`;
+}
+
+/** CSV-Datei im Browser erzeugen und herunterladen. */
+function downloadCsv(filename, headers, rows) {
+  const esc = (v) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [headers.join(";"), ...rows.map((r) => r.map(esc).join(";"))];
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function userAdminRow(p, meId) {
   const isMe = p.id === meId;
   return `<div class="admin-row">
@@ -775,6 +888,12 @@ function userAdminRow(p, meId) {
       </div>
       <div class="small muted">@${escapeHtml(p.username)} &middot; ${formatCount(p.follower_count)} Follower</div>
     </div>
+    <select class="input admin-role" data-role="${escapeHtml(p.id)}" title="Rolle"
+      ${isMe ? "disabled" : ""}>
+      <option value="user"      ${p.role === "user" ? "selected" : ""}>Nutzer</option>
+      <option value="moderator" ${p.role === "moderator" ? "selected" : ""}>Moderator</option>
+      <option value="admin"     ${p.role === "admin" ? "selected" : ""}>Admin</option>
+    </select>
     <button class="btn btn-ghost btn-compact" data-open="${escapeHtml(p.id)}">Profil</button>
     <button class="btn btn-ghost btn-compact" data-verify="${escapeHtml(p.id)}"
       data-verified="${p.verified ? "true" : "false"}" title="Blauer Haken">
