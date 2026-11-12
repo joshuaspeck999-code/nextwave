@@ -157,13 +157,22 @@ export function statusLabel(status) {
 }
 
 /* ---------------------------------------------------------------------
+   Event-Badge (z. B. "OG" fuer alle, die waehrend eines Events beitraten)
+--------------------------------------------------------------------- */
+export function badgeHtml(profile) {
+  const label = profile?.badge;
+  if (!label) return "";
+  return `<span class="badge og" title="Event-Badge">${icon("spark")}${escapeHtml(label)}</span>`;
+}
+
+/* ---------------------------------------------------------------------
    Nutzer-Zeile fuer Listen
 --------------------------------------------------------------------- */
 export function userRow(profile, { showFollow = false, following = false } = {}) {
   return `<div class="user-row" data-open-user="${escapeHtml(profile.id)}" role="button" tabindex="0">
     ${avatarHtml(profile, "sm")}
     <div class="grow" style="min-width:0;">
-      <div class="user-row-name">${escapeHtml(profile.display_name || profile.username)}</div>
+      <div class="user-row-name">${escapeHtml(profile.display_name || profile.username)}${badgeHtml(profile)}</div>
       <div class="small muted">@${escapeHtml(profile.username)} &middot; ${formatCount(profile.follower_count)} Follower</div>
     </div>
     ${showFollow

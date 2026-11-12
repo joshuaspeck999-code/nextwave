@@ -15,7 +15,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 --------------------------------------------------------------------- */
 const PROFILE_COLUMNS = [
   "id", "username", "display_name", "bio", "avatar_path", "banner_path",
-  "website_url", "birthdate", "is_private", "role", "is_blocked",
+  "website_url", "birthdate", "is_private", "role", "is_blocked", "badge",
   "follower_count", "following_count", "video_count", "total_like_count",
   "created_at",
 ].join(", ");
@@ -738,4 +738,62 @@ export async function adminListProfiles({ query = "", filter = "all", limit = 10
   const { data, error } = await request.order("created_at", { ascending: false });
   if (error) throw error;
   return data || [];
+}
+
+/* =====================================================================
+   EVENTS (zeitlich begrenzte Aktionen mit Badge)
+===================================================================== */
+const EVENT_COLUMNS = "id, name, badge_label, starts_at, ends_at, created_at";
+
+/** Das gerade laufende Event (oder null). */
+export async function getActiveEvent() {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("platform_events")
+    .select(EVENT_COLUMNS)
+    .lte("starts_at", now)
+    .gt("ends_at", now)
+    .order("starts_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+/** Alle Events (neueste zuerst) fuer die Admin-Uebersicht. */
+export async function listEvents(limit = 20) {
+  const { data, error } = await supabase
+    .from("platform_events")
+    .select(EVENT_COLUMNS)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+/** Wie viele Konten tragen aktuell dieses Badge? */
+export async function countBadgeHolders(badgeLabel) {
+  if (!badgeLabel) return 0;
+  const { count, error } = await supabase
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("badge", badgeLabel);
+  if (error) throw error;
+  return count || 0;
+}
+
+/** Neues Event starten (nur Admin - serverseitig geprueft). */
+export async function startEvent({ name, badgeLabel, durationMinutes }) {
+  const { error } = await supabase.rpc("nextwave_start_event", {
+    p_name: name,
+    p_badge_label: badgeLabel,
+    p_duration_minutes: Math.round(durationMinutes),
+  });
+  if (error) throw error;
+}
+
+/** Das laufende Event vorzeitig beenden (nur Admin). */
+export async function stopActiveEvent() {
+  const { error } = await supabase.rpc("nextwave_stop_active_event");
+  if (error) throw error;
 }

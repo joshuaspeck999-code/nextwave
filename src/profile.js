@@ -12,7 +12,7 @@ import {
 } from "./utils.js";
 import {
   icon, avatarHtml, bottomNav, emptyState, errorState, skeletonRows,
-  userRow, memberSince, videoTile,
+  userRow, memberSince, videoTile, badgeHtml,
 } from "./ui.js";
 import { MAX_BANNER_BYTES, IMAGE_MIME_TYPES } from "./config.js";
 
@@ -108,7 +108,7 @@ function profileHeader(profile, { isSelf, following = false }) {
         </div>
       </div>
 
-      <h2 style="margin:0 0 2px;">${escapeHtml(profile.display_name || profile.username)}</h2>
+      <h2 style="margin:0 0 2px;">${escapeHtml(profile.display_name || profile.username)}${badgeHtml(profile)}</h2>
       <div class="muted small">@${escapeHtml(profile.username)}
         ${profile.is_private ? `<span class="badge" style="margin-left:6px;">${icon("lock")} Privat</span>` : ""}
       </div>

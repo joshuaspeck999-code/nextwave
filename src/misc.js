@@ -5,7 +5,7 @@ import * as data from "./data.js";
 import { escapeHtml, describeError, toast, debounce, formatCount } from "./utils.js";
 import {
   icon, avatarHtml, bottomNav, emptyState, errorState, skeletonRows,
-  userRow, videoTile, timeAgo, statusLabel,
+  userRow, videoTile, timeAgo, statusLabel, badgeHtml,
 } from "./ui.js";
 
 /* =====================================================================
@@ -242,7 +242,10 @@ export async function renderAdmin(root, ctx) {
     { id: "reports",  label: "Meldungen" },
     { id: "comments", label: "Kommentare" },
   ];
-  if (isAdmin) tabs.push({ id: "lockdown", label: "Lockdown" });
+  if (isAdmin) {
+    tabs.push({ id: "event", label: "Event" });
+    tabs.push({ id: "lockdown", label: "Lockdown" });
+  }
 
   root.innerHTML = `
     <div class="screen">
@@ -522,6 +525,118 @@ export async function renderAdmin(root, ctx) {
   };
 
   /* -----------------------------------------------------------------
+     Event (nur Admin): zeitlich begrenzte Aktion mit OG-Badge
+  ----------------------------------------------------------------- */
+  const loadEvent = async () => {
+    body.innerHTML = skeletonRows(4);
+    try {
+      const [active, events] = await Promise.all([
+        data.getActiveEvent(),
+        data.listEvents(20),
+      ]);
+      const holders = active
+        ? await data.countBadgeHolders(active.badge_label).catch(() => 0)
+        : 0;
+
+      body.innerHTML = `
+        <div class="card" style="margin-bottom:16px;border-color:${active ? "var(--accent)" : "var(--outline)"};">
+          <div class="row" style="align-items:center;gap:12px;">
+            <div class="notif-icon" style="color:${active ? "var(--accent)" : "var(--text-2)"}">${icon("spark")}</div>
+            <div class="grow">
+              <div style="font-weight:600;">${active ? escapeHtml(active.name) : "Kein Event aktiv"}</div>
+              <div class="small muted">${active
+                ? `Badge &bdquo;${escapeHtml(active.badge_label)}&ldquo; &middot; endet am ${escapeHtml(new Date(active.ends_at).toLocaleString("de-DE"))}`
+                : "Starte ein Event, damit jedes neue Konto automatisch das Badge bekommt."}</div>
+              ${active ? `<div class="small muted" style="margin-top:4px;">${holders} Konto(en) tragen dieses Badge.</div>` : ""}
+            </div>
+          </div>
+          ${active ? `<button class="btn btn-danger btn-compact" style="margin-top:12px;" data-stop-event>Event jetzt beenden</button>` : ""}
+        </div>
+
+        <form class="stack" data-event-form>
+          <div class="field">
+            <label class="label" for="ev-name">Event-Name</label>
+            <input class="input" id="ev-name" name="name" maxlength="60"
+                   placeholder="z. B. OG Launch" autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label class="label" for="ev-badge">Badge-Beschriftung</label>
+            <input class="input" id="ev-badge" name="badge" maxlength="20" value="OG" autocomplete="off" />
+            <div class="field-hint">Erscheint neben dem Namen, max. 20 Zeichen (z. B. OG).</div>
+          </div>
+
+          <div class="field">
+            <label class="label" for="ev-duration">Dauer</label>
+            <div class="row" style="gap:8px;">
+              <input class="input" id="ev-duration" name="duration" type="number"
+                     min="1" step="1" value="24" style="flex:1;" />
+              <select class="input" name="unit" style="flex:1;">
+                <option value="1">Minuten</option>
+                <option value="60" selected>Stunden</option>
+                <option value="1440">Tage</option>
+                <option value="10080">Wochen</option>
+              </select>
+            </div>
+            <div class="field-hint">Nur Konten, die in diesem Zeitraum entstehen, erhalten das Badge.</div>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Event starten</button>
+        </form>
+
+        <h3 style="margin:22px 0 8px;">Fr&uuml;here Events</h3>
+        <div>${events.length
+          ? events.map(eventHistoryRow).join("")
+          : `<p class="muted small">Noch keine Events gestartet.</p>`}</div>`;
+
+      const form = body.querySelector("[data-event-form]");
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = form.querySelector("[type='submit']");
+        const fd = new FormData(form);
+        const name = String(fd.get("name") || "").trim();
+        const badge = String(fd.get("badge") || "").trim();
+        const amount = Number(fd.get("duration"));
+        const perUnit = Number(fd.get("unit")) || 1;
+        if (!name) { toast("Bitte einen Event-Namen angeben.", "error"); return; }
+        if (!badge) { toast("Bitte eine Badge-Beschriftung angeben.", "error"); return; }
+        if (!Number.isFinite(amount) || amount < 1) { toast("Bitte eine g\u00fcltige Dauer w\u00e4hlen.", "error"); return; }
+
+        btn.disabled = true;
+        try {
+          await data.startEvent({
+            name, badgeLabel: badge, durationMinutes: Math.round(amount * perUnit),
+          });
+          toast("Event gestartet.", "success");
+          loadEvent();
+        } catch (error) {
+          toast(describeError(error), "error");
+          btn.disabled = false;
+        }
+      };
+
+      const stopBtn = body.querySelector("[data-stop-event]");
+      if (stopBtn) {
+        stopBtn.onclick = async () => {
+          stopBtn.disabled = true;
+          try {
+            await data.stopActiveEvent();
+            toast("Event beendet.", "success");
+            loadEvent();
+          } catch (error) {
+            toast(describeError(error), "error");
+            stopBtn.disabled = false;
+          }
+        };
+      }
+    } catch (error) {
+      body.innerHTML = errorState(describeError(error));
+      const retry = body.querySelector("[data-retry]");
+      if (retry) retry.onclick = loadEvent;
+    }
+  };
+
+  /* -----------------------------------------------------------------
      Lockdown (nur Admin)
   ----------------------------------------------------------------- */
   const loadLockdown = async () => {
@@ -610,6 +725,7 @@ export async function renderAdmin(root, ctx) {
     videos: loadVideos,
     reports: loadReports,
     comments: loadComments,
+    event: loadEvent,
     lockdown: loadLockdown,
   };
 
@@ -641,7 +757,7 @@ function userAdminRow(p, meId) {
     ${avatarHtml(p, "sm")}
     <div class="grow" style="min-width:0;">
       <div class="user-row-name">
-        ${escapeHtml(p.display_name || p.username)}
+        ${escapeHtml(p.display_name || p.username)}${badgeHtml(p)}
         ${p.is_blocked ? '<span class="badge danger">Gesperrt</span>' : ""}
         ${roleLabel ? `<span class="badge accent">${escapeHtml(roleLabel)}</span>` : ""}
       </div>
@@ -651,5 +767,21 @@ function userAdminRow(p, meId) {
     ${isMe ? "" : `<button class="btn ${p.is_blocked ? "btn-ghost" : "btn-danger"} btn-compact"
       data-block="${escapeHtml(p.id)}" data-blocked="${p.is_blocked ? "true" : "false"}">
       ${p.is_blocked ? "Entsperren" : "Sperren"}</button>`}
+  </div>`;
+}
+
+/** Ein Eintrag in der Event-Historie (Admin-Panel). */
+function eventHistoryRow(e) {
+  const now = Date.now();
+  const starts = new Date(e.starts_at).getTime();
+  const ends = new Date(e.ends_at).getTime();
+  const isActive = starts <= now && ends > now;
+  return `<div class="admin-row" style="align-items:flex-start;">
+    <span class="badge og">${icon("spark")}${escapeHtml(e.badge_label)}</span>
+    <div class="grow" style="min-width:0;">
+      <div class="user-row-name">${escapeHtml(e.name)}${isActive ? '<span class="badge accent">aktiv</span>' : ""}</div>
+      <div class="small muted">${escapeHtml(new Date(e.starts_at).toLocaleString("de-DE"))}
+        &ndash; ${escapeHtml(new Date(e.ends_at).toLocaleString("de-DE"))}</div>
+    </div>
   </div>`;
 }
