@@ -159,11 +159,15 @@ export function statusLabel(status) {
 
 /* ---------------------------------------------------------------------
    Badges neben dem Namen:
+     - Blauer Haken (verifiziertes Konto, vom Admin vergeben)
      - Team-Badge (Admin / Moderator) aus profile.role
      - Event-Badge (z. B. "OG" fuer alle, die waehrend eines Events beitraten)
 --------------------------------------------------------------------- */
 export function badgeHtml(profile) {
   const parts = [];
+  if (profile?.verified) {
+    parts.push(`<span class="verified" title="Verifiziert" style="margin-left:6px;">${icon("check")}</span>`);
+  }
   if (profile?.role === "admin") {
     parts.push(`<span class="badge admin" title="Team" style="margin-left:6px;">${icon("shield")}Admin</span>`);
   } else if (profile?.role === "moderator") {

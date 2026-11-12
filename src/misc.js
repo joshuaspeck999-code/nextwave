@@ -331,6 +331,20 @@ export async function renderAdmin(root, ctx) {
             }
           };
         });
+        list.querySelectorAll("[data-verify]").forEach((b) => {
+          b.onclick = async () => {
+            const verified = b.dataset.verified === "true";
+            b.disabled = true;
+            try {
+              await data.setUserVerified(b.dataset.verify, !verified);
+              toast(!verified ? "Blauer Haken vergeben." : "Blauer Haken entfernt.", "success");
+              run();
+            } catch (error) {
+              toast(describeError(error), "error");
+              b.disabled = false;
+            }
+          };
+        });
       } catch (error) {
         list.innerHTML = errorState(describeError(error));
         const retry = list.querySelector("[data-retry]");
@@ -762,6 +776,9 @@ function userAdminRow(p, meId) {
       <div class="small muted">@${escapeHtml(p.username)} &middot; ${formatCount(p.follower_count)} Follower</div>
     </div>
     <button class="btn btn-ghost btn-compact" data-open="${escapeHtml(p.id)}">Profil</button>
+    <button class="btn btn-ghost btn-compact" data-verify="${escapeHtml(p.id)}"
+      data-verified="${p.verified ? "true" : "false"}" title="Blauer Haken">
+      ${icon("check")}${p.verified ? "Haken weg" : "Blauer Haken"}</button>
     ${isMe ? "" : `<button class="btn ${p.is_blocked ? "btn-ghost" : "btn-danger"} btn-compact"
       data-block="${escapeHtml(p.id)}" data-blocked="${p.is_blocked ? "true" : "false"}">
       ${p.is_blocked ? "Entsperren" : "Sperren"}</button>`}

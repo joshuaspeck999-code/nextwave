@@ -16,6 +16,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 const PROFILE_COLUMNS = [
   "id", "username", "display_name", "bio", "avatar_path", "banner_path",
   "website_url", "birthdate", "is_private", "role", "is_blocked", "badge",
+  "verified",
   "follower_count", "following_count", "video_count", "total_like_count",
   "created_at",
 ].join(", ");
@@ -643,6 +644,14 @@ export async function resolveReport(reportId, status, note = "") {
 export async function setUserBlocked(targetUserId, blocked) {
   const { error } = await supabase.rpc("nextwave_set_user_blocked", {
     p_user: targetUserId, p_blocked: blocked,
+  });
+  if (error) throw error;
+}
+
+/** Blauen Haken setzen/entfernen (nur Admin - serverseitig geprüft). */
+export async function setUserVerified(targetUserId, verified) {
+  const { error } = await supabase.rpc("nextwave_set_verified", {
+    p_user: targetUserId, p_verified: verified,
   });
   if (error) throw error;
 }

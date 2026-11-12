@@ -289,10 +289,22 @@ textarea.input { resize: vertical; min-height: 90px; }
   background: linear-gradient(90deg, rgba(255,60,60,.22), rgba(160,0,0,.20));
 }
 .badge.mod {
-  color: #7fc4ff;
-  border-color: #2b6f9e;
-  background: linear-gradient(90deg, rgba(0,140,255,.22), rgba(0,90,200,.18));
+  color: #ffd23f;
+  border-color: #8a6d1f;
+  background: linear-gradient(90deg, rgba(255,210,63,.22), rgba(200,150,0,.18));
 }
+.verified {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1d9bf0;
+  color: #fff;
+  vertical-align: -3px;
+}
+.verified .ico { width: 11px; height: 11px; stroke-width: 3.2; margin: 0; }
 
 /* --------------------------------------------------------------------- */
 /* Bottom-Navigation                                                     */
